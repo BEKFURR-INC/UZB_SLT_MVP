@@ -8,6 +8,7 @@ import logging
 import uuid
 import threading
 import base64
+import traceback
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -204,6 +205,7 @@ def process_data_background(temp_dir, user_id):
         logging.info(f"Data processing completed. Saved to {pickle_path}")
     except Exception as e:
         logging.error(f"Error in data processing: {str(e)}")
+        logging.error(traceback.format_exc())
 
 def detect_hand_and_elbow_movement(video_path, hands, pose):
     cap = cv2.VideoCapture(video_path)
@@ -381,38 +383,46 @@ def train_model_background(pickle_path, user_id):
         logging.info(f"Model training completed. Saved to {model_path}")
     except Exception as e:
         logging.error(f"Error in model training: {str(e)}")
+        logging.error(traceback.format_exc())
 
 @login_required
+@ensure_csrf_cookie
 def translate_video(request):
     if request.method == 'POST':
-        video_file = request.FILES.get('video')
-        model_id = request.POST.get('model_id')
-        
-        if not video_file or not model_id:
-            return JsonResponse({'error': 'Please provide both video and model.'}, status=400)
-        
-        # Save video temporarily
-        fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'temp'))
-        filename = fs.save(video_file.name, video_file)
-        video_path = os.path.join(settings.MEDIA_ROOT, 'temp', filename)
-        
-        # Get model
         try:
-            model_obj = TrainedModel.objects.get(id=model_id)
-            model_path = os.path.join(settings.MEDIA_ROOT, model_obj.file.name)
+            video_file = request.FILES.get('video')
+            model_id = request.POST.get('model_id')
             
-            # Process video
-            result = translate_video_background(video_path, model_path)
+            if not video_file or not model_id:
+                return JsonResponse({'error': 'Please provide both video and model.'}, status=400)
             
-            # Clean up
-            if os.path.exists(video_path):
-                os.remove(video_path)
+            # Save video temporarily
+            fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'temp'))
+            filename = fs.save(video_file.name, video_file)
+            video_path = os.path.join(settings.MEDIA_ROOT, 'temp', filename)
             
-            return JsonResponse({'translation': result})
-        except TrainedModel.DoesNotExist:
-            return JsonResponse({'error': 'Model not found.'}, status=404)
+            # Get model
+            try:
+                model_obj = TrainedModel.objects.get(id=model_id)
+                model_path = os.path.join(settings.MEDIA_ROOT, model_obj.file.name)
+                
+                # Process video
+                result = translate_video_background(video_path, model_path)
+                
+                # Clean up
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+                
+                return JsonResponse({'translation': result})
+            except TrainedModel.DoesNotExist:
+                return JsonResponse({'error': 'Model not found.'}, status=404)
+            except Exception as e:
+                logging.error(f"Error in translate_video: {str(e)}")
+                logging.error(traceback.format_exc())
+                return JsonResponse({'error': str(e)}, status=500)
         except Exception as e:
-            logging.error(f"Error in translate_video: {str(e)}")
+            logging.error(f"Outer error in translate_video: {str(e)}")
+            logging.error(traceback.format_exc())
             return JsonResponse({'error': str(e)}, status=500)
     
     models = TrainedModel.objects.filter(created_by=request.user)
@@ -454,9 +464,11 @@ def translate_video_background(video_path, model_path):
             return "No valid data detected"
     except Exception as e:
         logging.error(f"Error in video translation: {str(e)}")
+        logging.error(traceback.format_exc())
         return f"Error: {str(e)}"
 
 @csrf_exempt
+@ensure_csrf_cookie
 def translate_frame(request):
     if request.method == 'POST':
         try:
@@ -537,6 +549,7 @@ def translate_frame(request):
                     pose_results.pose_landmarks,
                     mp_pose.POSE_CONNECTIONS,
                     mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2),
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness  circle_radius=2),
                     mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2)
                 )
             
@@ -627,6 +640,7 @@ def translate_frame(request):
                 })
         except Exception as e:
             logging.error(f"Error in frame translation: {str(e)}")
+            logging.error(traceback.format_exc())
             return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Only POST method is allowed'}, status=405)
