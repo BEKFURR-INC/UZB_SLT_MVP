@@ -11,7 +11,7 @@ SECRET_KEY = 'django-insecure-bekfurr-inc-2025-sign-language-translator'
 DEBUG = True
 
 # Update allowed hosts to include Render.com domains
-ALLOWED_HOSTS = ['*', '.onrender.com', 'uzb-slt-mvp.onrender.com']
+ALLOWED_HOSTS = ['*', '.onrender.com', 'uzb-slt-mvp.onrender.com', 'https://uzb-slt-mvp.onrender.com']
 
 # CSRF Trusted Origins - Add your Render.com domain here
 CSRF_TRUSTED_ORIGINS = [
