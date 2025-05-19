@@ -625,8 +625,8 @@ def translate_frame(request):
                     'word': None,
                     'frame': f"data:image/jpeg;base64,{frame_base64}"
                 })
-    except Exception as e:
-        logging.error(f"Error in frame translation: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=500)
+        except Exception as e:
+            logging.error(f"Error in frame translation: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Only POST method is allowed'}, status=405)
