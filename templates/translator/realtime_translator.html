@@ -328,7 +328,7 @@
         }
         
         // Set up CSRF token for all AJAX requests
-        const csrftoken = getCookie('csrftoken');
+        const csrftoken = getCookie('csrftoken') || csrfToken;
         
         function csrfSafeMethod(method) {
             // these HTTP methods do not require CSRF protection
@@ -343,6 +343,47 @@
                 }
             }
         });
+        
+        // Helper function to handle fetch responses
+        async function handleFetchResponse(response) {
+            // Check if response is ok (status in the range 200-299)
+            if (!response.ok) {
+                // Try to get error message from response
+                try {
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    } else {
+                        const errorText = await response.text();
+                        // If it's HTML, extract a meaningful error message if possible
+                        if (errorText.includes('<!DOCTYPE html>')) {
+                            const titleMatch = errorText.match(/<title>(.*?)<\/title>/);
+                            if (titleMatch && titleMatch[1]) {
+                                throw new Error(`Server error: ${titleMatch[1]}`);
+                            }
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                } catch (e) {
+                    throw e;
+                }
+            }
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else {
+                const text = await response.text();
+                try {
+                    // Try to parse as JSON anyway
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error(`Expected JSON response but got: ${text.substring(0, 100)}...`);
+                }
+            }
+        }
         
         // ==================== REAL-TIME TRANSLATION ====================
         const realtimeVideo = document.getElementById('realtime-video');
@@ -465,11 +506,7 @@
                     }
                 });
                 
-                if (!serverResponse.ok) {
-                    throw new Error(`HTTP error! status: ${serverResponse.status}`);
-                }
-                
-                const data = await serverResponse.json();
+                const data = await handleFetchResponse(serverResponse);
                 
                 // Display the processed frame
                 if (data.frame) {
@@ -718,11 +755,7 @@
                     }
                 });
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                const data = await handleFetchResponse(response);
                 
                 if (data.translation) {
                     recordOutput.textContent = data.translation;
@@ -733,6 +766,7 @@
                 }
             } catch (error) {
                 console.error('Error processing recording:', error);
+                recordOutput.textContent = `Error: ${error.message}`;
                 updateRecordStatus('Error processing recording: ' + error.message, 'danger');
             } finally {
                 stopRecordCamera();
@@ -776,11 +810,7 @@
                     }
                 });
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                const data = await handleFetchResponse(response);
                 
                 if (data.translation) {
                     uploadOutput.textContent = data.translation;
@@ -791,7 +821,7 @@
                 }
             } catch (error) {
                 console.error('Error uploading video:', error);
-                uploadOutput.textContent = 'Error processing video. Please try again.';
+                uploadOutput.textContent = `Error: ${error.message}`;
                 updateUploadStatus('Error processing video: ' + error.message, 'danger');
             }
         }
