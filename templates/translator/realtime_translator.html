@@ -70,6 +70,11 @@
                                 <option value="{{ model.id }}" {% if request.GET.model_id == model.id|stringformat:"s" %}selected{% endif %}>{{ model.name }} ({{ model.accuracy|floatformat:2 }}%)</option>
                                 {% endfor %}
                             </select>
+                            {% if not models %}
+                            <div class="alert alert-warning mt-2">
+                                <i class="fas fa-exclamation-triangle me-2"></i>No models found. Please <a href="{% url 'model_trainer' %}">train a model</a> first.
+                            </div>
+                            {% endif %}
                         </div>
                         
                         <div class="mb-3">
@@ -85,11 +90,17 @@
                         </div>
                         
                         <div class="d-grid gap-2">
-                            <button id="realtime-start" class="btn btn-primary">
+                            <button id="realtime-start" class="btn btn-primary" {% if not models %}disabled{% endif %}>
                                 <i class="fas fa-play me-2"></i>Start Translation
                             </button>
                             <button id="realtime-stop" class="btn btn-danger" disabled>
                                 <i class="fas fa-stop me-2"></i>Stop
+                            </button>
+                        </div>
+                        
+                        <div class="d-grid mt-3">
+                            <button id="refresh-session" class="btn btn-outline-secondary">
+                                <i class="fas fa-sync me-2"></i>Refresh Session
                             </button>
                         </div>
                     </div>
@@ -159,6 +170,11 @@
                                 <option value="{{ model.id }}">{{ model.name }} ({{ model.accuracy|floatformat:2 }}%)</option>
                                 {% endfor %}
                             </select>
+                            {% if not models %}
+                            <div class="alert alert-warning mt-2">
+                                <i class="fas fa-exclamation-triangle me-2"></i>No models found. Please <a href="{% url 'model_trainer' %}">train a model</a> first.
+                            </div>
+                            {% endif %}
                         </div>
                         
                         <div class="mb-3">
@@ -174,7 +190,7 @@
                         </div>
                         
                         <div class="d-grid gap-2">
-                            <button id="record-start" class="btn btn-primary">
+                            <button id="record-start" class="btn btn-primary" {% if not models %}disabled{% endif %}>
                                 <i class="fas fa-record-vinyl me-2"></i>Start Recording
                             </button>
                             <button id="record-stop" class="btn btn-danger" disabled>
@@ -206,6 +222,11 @@
                                     <option value="{{ model.id }}">{{ model.name }} ({{ model.accuracy|floatformat:2 }}%)</option>
                                     {% endfor %}
                                 </select>
+                                {% if not models %}
+                                <div class="alert alert-warning mt-2">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>No models found. Please <a href="{% url 'model_trainer' %}">train a model</a> first.
+                                </div>
+                                {% endif %}
                             </div>
                             <div class="mb-3">
                                 <label for="video-file" class="form-label">Select Video File</label>
@@ -213,7 +234,7 @@
                                 <div class="form-text">Upload a video of sign language gestures to translate.</div>
                             </div>
                             <div class="d-grid">
-                                <button type="submit" class="btn btn-primary">
+                                <button type="submit" class="btn btn-primary" {% if not models %}disabled{% endif %}>
                                     <i class="fas fa-upload me-2"></i>Upload & Translate
                                 </button>
                             </div>
@@ -265,6 +286,25 @@
     </div>
 </div>
 
+<!-- Session Expired Modal -->
+<div class="modal fade" id="sessionExpiredModal" tabindex="-1" aria-labelledby="sessionExpiredModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="sessionExpiredModalLabel">Session Expired</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Your session has expired or there was an authentication error. Please refresh the page to continue.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="refreshPageBtn">Refresh Page</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
     .video-container {
         position: relative;
@@ -309,7 +349,10 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // CSRF token
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        let csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        
+        // Session expired modal
+        const sessionExpiredModal = new bootstrap.Modal(document.getElementById('sessionExpiredModal'));
         
         // Add CSRF token to all AJAX requests
         function getCookie(name) {
@@ -327,8 +370,28 @@
             return cookieValue;
         }
         
+        // Refresh CSRF token
+        function refreshCsrfToken() {
+            const newCsrfToken = getCookie('csrftoken');
+            if (newCsrfToken) {
+                csrfToken = newCsrfToken;
+                // Update all CSRF token inputs in the page
+                document.querySelectorAll('[name=csrfmiddlewaretoken]').forEach(input => {
+                    input.value = csrfToken;
+                });
+                return true;
+            }
+            return false;
+        }
+        
         // Set up CSRF token for all AJAX requests
-        const csrftoken = getCookie('csrftoken') || csrfToken;
+        function updateCsrfToken() {
+            const cookieToken = getCookie('csrftoken');
+            if (cookieToken) {
+                csrfToken = cookieToken;
+            }
+            return csrfToken;
+        }
         
         function csrfSafeMethod(method) {
             // these HTTP methods do not require CSRF protection
@@ -339,10 +402,37 @@
         $.ajaxSetup({
             beforeSend: function(xhr, settings) {
                 if (!csrfSafeMethod(settings.type) && !this.crossDomain) {
-                    xhr.setRequestHeader("X-CSRFToken", csrftoken);
+                    xhr.setRequestHeader("X-CSRFToken", updateCsrfToken());
                 }
             }
         });
+        
+        // Refresh session
+        async function refreshSession() {
+            try {
+                const response = await fetch('{% url "realtime_translator" %}', {
+                    method: 'GET',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (response.ok) {
+                    refreshCsrfToken();
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Error refreshing session:', error);
+                return false;
+            }
+        }
+        
+        // Handle session expiration
+        function handleSessionExpiration() {
+            stopRealtimeTranslation();
+            sessionExpiredModal.show();
+        }
         
         // Helper function to handle fetch responses
         async function handleFetchResponse(response) {
@@ -356,12 +446,11 @@
                         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                     } else {
                         const errorText = await response.text();
-                        // If it's HTML, extract a meaningful error message if possible
+                        // If it's HTML, it might be a login page or error page
                         if (errorText.includes('<!DOCTYPE html>')) {
-                            const titleMatch = errorText.match(/<title>(.*?)<\/title>/);
-                            if (titleMatch && titleMatch[1]) {
-                                throw new Error(`Server error: ${titleMatch[1]}`);
-                            }
+                            // Session might have expired
+                            handleSessionExpiration();
+                            throw new Error('Session expired or authentication error');
                         }
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -380,6 +469,11 @@
                     // Try to parse as JSON anyway
                     return JSON.parse(text);
                 } catch (e) {
+                    // If we get HTML, it might be a login page
+                    if (text.includes('<!DOCTYPE html>')) {
+                        handleSessionExpiration();
+                        throw new Error('Session expired or authentication error');
+                    }
                     throw new Error(`Expected JSON response but got: ${text.substring(0, 100)}...`);
                 }
             }
@@ -397,11 +491,14 @@
         const realtimeClearButton = document.getElementById('realtime-clear');
         const realtimeOutput = document.getElementById('realtime-output');
         const realtimeStatus = document.getElementById('realtime-status');
+        const refreshSessionButton = document.getElementById('refresh-session');
+        const refreshPageButton = document.getElementById('refreshPageBtn');
         
         let realtimeStream = null;
         let realtimeIsRunning = false;
         let realtimeInterval = null;
         let realtimeTextOutput = "";
+        let sessionRefreshInterval = null;
         
         // Update real-time status
         function updateRealtimeStatus(message, type = 'info') {
@@ -411,7 +508,7 @@
         
         // Update real-time UI based on state
         function updateRealtimeUI() {
-            realtimeStartButton.disabled = realtimeIsRunning;
+            realtimeStartButton.disabled = realtimeIsRunning || !realtimeModelSelect.value;
             realtimeStopButton.disabled = !realtimeIsRunning;
             realtimeModelSelect.disabled = realtimeIsRunning;
             realtimeIntervalInput.disabled = realtimeIsRunning;
@@ -480,6 +577,16 @@
             if (!realtimeIsRunning) return;
             
             try {
+                // Check if model is selected
+                if (!realtimeModelSelect.value) {
+                    updateRealtimeStatus('No model selected. Please select a model.', 'warning');
+                    stopRealtimeTranslation();
+                    return;
+                }
+                
+                // Refresh CSRF token before each request
+                refreshCsrfToken();
+                
                 // Capture frame
                 const dataUrl = captureRealtimeFrame();
                 if (!dataUrl) {
@@ -502,7 +609,7 @@
                     method: 'POST',
                     body: formData,
                     headers: {
-                        'X-CSRFToken': csrftoken
+                        'X-CSRFToken': updateCsrfToken()
                     }
                 });
                 
@@ -530,6 +637,16 @@
             } catch (error) {
                 console.error('Error processing frame:', error);
                 updateRealtimeStatus('Error processing frame: ' + error.message, 'danger');
+                
+                // If there's a session error, stop the translation
+                if (error.message.includes('Session expired') || error.message.includes('Expected JSON')) {
+                    stopRealtimeTranslation();
+                    handleSessionExpiration();
+                }
+                // If there's a model error, stop the translation
+                else if (error.message.includes('Model not found') || error.message.includes('permission')) {
+                    stopRealtimeTranslation();
+                }
             }
         }
         
@@ -540,10 +657,16 @@
                 return;
             }
             
+            // Refresh session before starting
+            await refreshSession();
+            
             if (await startRealtimeCamera()) {
                 realtimeIsRunning = true;
                 updateRealtimeUI();
                 updateRealtimeStatus('Translation started');
+                
+                // Start periodic session refresh
+                sessionRefreshInterval = setInterval(refreshSession, 60000); // Refresh every minute
                 
                 // Wait a moment for the camera to initialize
                 setTimeout(() => {
@@ -561,6 +684,11 @@
             if (realtimeInterval) {
                 clearInterval(realtimeInterval);
                 realtimeInterval = null;
+            }
+            
+            if (sessionRefreshInterval) {
+                clearInterval(sessionRefreshInterval);
+                sessionRefreshInterval = null;
             }
             
             stopRealtimeCamera();
@@ -604,7 +732,7 @@
         
         // Update record UI based on state
         function updateRecordUI() {
-            recordStartButton.disabled = recordIsRunning;
+            recordStartButton.disabled = recordIsRunning || !recordModelSelect.value;
             recordStopButton.disabled = !recordIsRunning;
             recordModelSelect.disabled = recordIsRunning;
             recordCameraSelect.disabled = recordIsRunning;
@@ -684,6 +812,9 @@
                 return;
             }
             
+            // Refresh session before starting
+            await refreshSession();
+            
             if (await startRecordCamera()) {
                 try {
                     recordedChunks = [];
@@ -736,6 +867,9 @@
         // Process recorded video
         async function processRecording() {
             try {
+                // Refresh CSRF token before request
+                refreshCsrfToken();
+                
                 // Create a blob from the recorded chunks
                 const blob = new Blob(recordedChunks, { type: 'video/webm' });
                 
@@ -751,7 +885,7 @@
                     method: 'POST',
                     body: formData,
                     headers: {
-                        'X-CSRFToken': csrftoken
+                        'X-CSRFToken': updateCsrfToken()
                     }
                 });
                 
@@ -768,6 +902,11 @@
                 console.error('Error processing recording:', error);
                 recordOutput.textContent = `Error: ${error.message}`;
                 updateRecordStatus('Error processing recording: ' + error.message, 'danger');
+                
+                // If there's a session error, show the modal
+                if (error.message.includes('Session expired') || error.message.includes('Expected JSON')) {
+                    handleSessionExpiration();
+                }
             } finally {
                 stopRecordCamera();
             }
@@ -795,6 +934,9 @@
         // Upload and translate video
         async function uploadAndTranslateVideo(file, modelId) {
             try {
+                // Refresh CSRF token before request
+                refreshCsrfToken();
+                
                 updateUploadStatus('Processing video...', 'info');
                 uploadOutput.textContent = 'Processing video...';
                 
@@ -806,7 +948,7 @@
                     method: 'POST',
                     body: formData,
                     headers: {
-                        'X-CSRFToken': csrftoken
+                        'X-CSRFToken': updateCsrfToken()
                     }
                 });
                 
@@ -823,6 +965,11 @@
                 console.error('Error uploading video:', error);
                 uploadOutput.textContent = `Error: ${error.message}`;
                 updateUploadStatus('Error processing video: ' + error.message, 'danger');
+                
+                // If there's a session error, show the modal
+                if (error.message.includes('Session expired') || error.message.includes('Expected JSON')) {
+                    handleSessionExpiration();
+                }
             }
         }
         
@@ -897,11 +1044,13 @@
         realtimeStartButton.addEventListener('click', startRealtimeTranslation);
         realtimeStopButton.addEventListener('click', stopRealtimeTranslation);
         realtimeClearButton.addEventListener('click', clearRealtimeOutput);
+        realtimeModelSelect.addEventListener('change', updateRealtimeUI);
         
         // Record & translate
         recordStartButton.addEventListener('click', startRecording);
         recordStopButton.addEventListener('click', stopRecording);
         recordClearButton.addEventListener('click', clearRecordOutput);
+        recordModelSelect.addEventListener('change', updateRecordUI);
         
         // Upload video
         uploadForm.addEventListener('submit', function(e) {
@@ -924,11 +1073,30 @@
         
         uploadClearButton.addEventListener('click', clearUploadOutput);
         
+        // Session management
+        refreshSessionButton.addEventListener('click', async function() {
+            updateRealtimeStatus('Refreshing session...', 'info');
+            const success = await refreshSession();
+            if (success) {
+                updateRealtimeStatus('Session refreshed successfully', 'success');
+            } else {
+                updateRealtimeStatus('Failed to refresh session', 'danger');
+                handleSessionExpiration();
+            }
+        });
+        
+        refreshPageButton.addEventListener('click', function() {
+            window.location.reload();
+        });
+        
         // Initialize
         getCameras();
         updateRealtimeUI();
         updateRecordUI();
         updateUploadStatus('Ready to upload a video');
+        
+        // Set up periodic session refresh (every 5 minutes)
+        setInterval(refreshSession, 300000);
     });
 </script>
 {% endblock %}
