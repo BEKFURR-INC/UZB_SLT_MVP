@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.core.files.storage import FileSystemStorage
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -30,6 +30,8 @@ mp_hands = mp.solutions.hands
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
+# Add this decorator to the home view
+@ensure_csrf_cookie
 def home(request):
     return render(request, 'translator/home.html')
 
@@ -68,7 +70,9 @@ def model_trainer(request):
     models = TrainedModel.objects.filter(created_by=request.user)
     return render(request, 'translator/model_trainer.html', {'models': models})
 
+# Add this decorator to the realtime_translator view
 @login_required
+@ensure_csrf_cookie
 def realtime_translator(request):
     models = TrainedModel.objects.filter(created_by=request.user)
     return render(request, 'translator/realtime_translator.html', {'models': models})
@@ -620,9 +624,9 @@ def translate_frame(request):
                 return JsonResponse({
                     'word': None,
                     'frame': f"data:image/jpeg;base64,{frame_base64}"
-                }) 
-        except Exception as e:
-            logging.error(f"Error in frame translation: {str(e)}")
-            return JsonResponse({'error': str(e)}, status=500)
+                })
+    except Exception as e:
+        logging.error(f"Error in frame translation: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Only POST method is allowed'}, status=405)
