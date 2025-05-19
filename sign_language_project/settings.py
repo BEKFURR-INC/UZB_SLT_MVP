@@ -10,7 +10,8 @@ SECRET_KEY = 'django-insecure-bekfurr-inc-2025-sign-language-translator'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+# Update allowed hosts to include Render.com domains
+ALLOWED_HOSTS = ['*', '.onrender.com']
 
 # Application definition
 INSTALLED_APPS = [
