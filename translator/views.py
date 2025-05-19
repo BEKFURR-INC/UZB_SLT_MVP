@@ -12,6 +12,8 @@ import traceback
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.contrib.auth import authenticate, login
+from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
@@ -20,7 +22,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
-from .forms import UserRegistrationForm, VideoUploadForm, ModelUploadForm, DataProcessorForm, ModelTrainerForm
+from .forms import VideoUploadForm, ModelUploadForm, DataProcessorForm, ModelTrainerForm
 from .models import SignVideo, TrainedModel, TranslationSession
 
 # Logging setup
@@ -36,17 +38,36 @@ mp_drawing = mp.solutions.drawing_utils
 def home(request):
     return render(request, 'translator/home.html')
 
-def register(request):
+# Simplified login view with fixed credentials
+def custom_login(request):
     if request.method == 'POST':
-        form = UserRegistrationForm(request.POST)
-        if form.is_valid():
-            form.save()
-            username = form.cleaned_data.get('username')
-            messages.success(request, f'Account created for {username}! You can now log in.')
-            return redirect('login')
-    else:
-        form = UserRegistrationForm()
-    return render(request, 'translator/register.html', {'form': form})
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        # Check for fixed credentials
+        if username == 'BEKFURR' and password == 'BEKFURR':
+            # Try to get the user
+            try:
+                user = User.objects.get(username='BEKFURR')
+            except User.DoesNotExist:
+                # Create the user if it doesn't exist
+                user = User.objects.create_superuser(
+                    username='BEKFURR',
+                    email='bekfurr@example.com',
+                    password='BEKFURR'
+                )
+            
+            # Authenticate and login
+            user = authenticate(username='BEKFURR', password='BEKFURR')
+            if user is not None:
+                login(request, user)
+                messages.success(request, 'Login successful!')
+                return redirect('dashboard')
+        
+        # If credentials don't match
+        messages.error(request, 'Invalid credentials. Please try again.')
+    
+    return render(request, 'registration/login.html')
 
 @login_required
 def dashboard(request):
