@@ -11,7 +11,7 @@ SECRET_KEY = 'django-insecure-bekfurr-inc-2025-sign-language-translator'
 DEBUG = True
 
 # Update allowed hosts to include Render.com domains
-ALLOWED_HOSTS = ['*', '.onrender.com']
+ALLOWED_HOSTS = ['*', 'https://uzb-slt-mvp.onrender.com/', 'uzb-slt-mvp.onrender.com']
 
 # Application definition
 INSTALLED_APPS = [
