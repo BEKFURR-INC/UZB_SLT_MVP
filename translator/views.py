@@ -76,6 +76,11 @@ def model_trainer(request):
 @ensure_csrf_cookie
 def realtime_translator(request):
     models = TrainedModel.objects.filter(created_by=request.user)
+    
+    # If this is an AJAX request, just return a simple response to refresh the CSRF token
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'status': 'ok', 'message': 'Session refreshed'})
+    
     return render(request, 'translator/realtime_translator.html', {'models': models})
 
 @login_required
@@ -482,16 +487,37 @@ def translate_frame(request):
             # Read frame
             frame = cv2.imdecode(np.frombuffer(frame_data.read(), np.uint8), cv2.IMREAD_COLOR)
             
-            # Get model
-            model_obj = get_object_or_404(TrainedModel, id=model_id)
-            model_path = os.path.join(settings.MEDIA_ROOT, model_obj.file.name)
+            # Get model - check if it exists and belongs to the current user
+            try:
+                # First check if the model exists at all
+                model_obj = TrainedModel.objects.get(id=model_id)
+                
+                # Then check if it belongs to the current user (if user is authenticated)
+                if request.user.is_authenticated and model_obj.created_by != request.user:
+                    logging.warning(f"User {request.user.username} attempted to access model {model_id} belonging to {model_obj.created_by.username}")
+                    return JsonResponse({'error': 'You do not have permission to use this model'}, status=403)
+                
+                model_path = os.path.join(settings.MEDIA_ROOT, model_obj.file.name)
+                
+                # Check if the model file exists
+                if not os.path.exists(model_path):
+                    logging.error(f"Model file not found: {model_path}")
+                    return JsonResponse({'error': 'Model file not found'}, status=404)
+                
+            except TrainedModel.DoesNotExist:
+                logging.error(f"Model with ID {model_id} not found")
+                return JsonResponse({'error': 'Model not found. Please select a valid model.'}, status=404)
             
             # Load model
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
-                model = model_data['model']
-                label_mapping = model_data.get('label_mapping', {})
-                inverse_label_mapping = {v: k for k, v in label_mapping.items()}
+            try:
+                with open(model_path, 'rb') as f:
+                    model_data = pickle.load(f)
+                    model = model_data['model']
+                    label_mapping = model_data.get('label_mapping', {})
+                    inverse_label_mapping = {v: k for k, v in label_mapping.items()}
+            except Exception as e:
+                logging.error(f"Error loading model file: {str(e)}")
+                return JsonResponse({'error': 'Error loading model file'}, status=500)
             
             # Initialize MediaPipe with lower detection confidence
             hands = mp_hands.Hands(
@@ -549,8 +575,7 @@ def translate_frame(request):
                     pose_results.pose_landmarks,
                     mp_pose.POSE_CONNECTIONS,
                     mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2),
-                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
-                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2)
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2)
                 )
             
             # Extract features
