@@ -119,7 +119,7 @@ CHANNEL_LAYERS = {
 }
 
 # Session cookie settings for cross-domain
-SESSION_COOKIE_SECURE = False  # Changed to False for local development
+SESSION_COOKIE_SECURE = False  # Changed to False for better compatibility
 SESSION_COOKIE_SAMESITE = 'Lax'  # Changed to Lax for better compatibility
 
 # Session settings
