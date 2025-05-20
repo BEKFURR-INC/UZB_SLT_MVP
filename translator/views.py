@@ -38,7 +38,7 @@ mp_drawing = mp.solutions.drawing_utils
 def home(request):
     return render(request, 'translator/home.html')
 
-# Completely rewritten login view with direct user creation and login
+# Simplified login view with fixed credentials
 def custom_login(request):
     if request.method == 'POST':
         username = request.POST.get('username')
@@ -46,32 +46,16 @@ def custom_login(request):
         
         logging.debug(f"Login attempt with username: {username}")
         
-        # For MVP, we only allow the fixed credentials
-        if username == 'BEKFURR' and password == 'BEKFURR':
-            # Check if the user exists
-            try:
-                user = User.objects.get(username='BEKFURR')
-                logging.debug("User BEKFURR found in database")
-            except User.DoesNotExist:
-                # Create the user if it doesn't exist
-                logging.debug("User BEKFURR not found, creating new user")
-                user = User.objects.create_user(
-                    username='BEKFURR',
-                    email='bekfurr@example.com',
-                    password='BEKFURR'
-                )
-                user.is_staff = True
-                user.is_superuser = True
-                user.save()
-                logging.debug("User BEKFURR created successfully")
-            
-            # Direct login without authenticate
+        # Try to authenticate the user
+        user = authenticate(request=request, username=username, password=password)
+        
+        if user is not None:
             login(request, user)
-            logging.debug("User logged in successfully")
+            logging.debug(f"User {username} authenticated successfully")
             messages.success(request, 'Login successful!')
             return redirect('dashboard')
         else:
-            logging.debug("Invalid credentials provided")
+            logging.debug(f"Authentication failed for username: {username}")
             messages.error(request, 'Invalid credentials.')
     
     return render(request, 'registration/login.html')
