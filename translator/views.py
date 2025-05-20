@@ -10,9 +10,8 @@ import threading
 import base64
 import traceback
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
@@ -33,38 +32,56 @@ mp_hands = mp.solutions.hands
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
+# Function to get or create default user
+def get_default_user():
+    try:
+        user, created = User.objects.get_or_create(
+            username='BEKFURR',
+            defaults={
+                'email': 'bekfurr@example.com',
+                'is_staff': True,
+                'is_superuser': True,
+            }
+        )
+        if created:
+            user.set_password('BEKFURR')
+            user.save()
+            logging.debug("Created default user BEKFURR")
+        return user
+    except Exception as e:
+        logging.error(f"Error getting default user: {e}")
+        # Fallback to first superuser or create one if none exists
+        try:
+            return User.objects.filter(is_superuser=True).first() or User.objects.create_superuser(
+                'admin', 'admin@example.com', 'admin'
+            )
+        except:
+            return None
+
+# Auto-login middleware for all views
+def auto_login(request):
+    if not request.user.is_authenticated:
+        user = get_default_user()
+        if user:
+            login(request, user)
+            logging.debug(f"Auto-logged in as {user.username}")
+    return request
+
 # Add this decorator to the home view
 @ensure_csrf_cookie
 def home(request):
+    # Auto-login
+    request = auto_login(request)
     return render(request, 'translator/home.html')
 
-# Simplified login view with fixed credentials
-def custom_login(request):
-    if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
-        
-        logging.debug(f"Login attempt with username: {username}")
-        
-        # Try to authenticate the user
-        user = authenticate(request=request, username=username, password=password)
-        
-        if user is not None:
-            login(request, user)
-            logging.debug(f"User {username} authenticated successfully")
-            messages.success(request, 'Login successful!')
-            return redirect('dashboard')
-        else:
-            logging.debug(f"Authentication failed for username: {username}")
-            messages.error(request, 'Invalid credentials.')
-    
-    return render(request, 'registration/login.html')
-
-@login_required
 def dashboard(request):
-    user_models = TrainedModel.objects.filter(created_by=request.user)
-    user_videos = SignVideo.objects.filter(uploaded_by=request.user)
-    user_sessions = TranslationSession.objects.filter(user=request.user).order_by('-start_time')[:5]
+    # Auto-login
+    request = auto_login(request)
+    
+    user = request.user
+    user_models = TrainedModel.objects.filter(created_by=user)
+    user_videos = SignVideo.objects.filter(uploaded_by=user)
+    user_sessions = TranslationSession.objects.filter(user=user).order_by('-start_time')[:5]
     
     context = {
         'user_models': user_models,
@@ -73,20 +90,26 @@ def dashboard(request):
     }
     return render(request, 'translator/dashboard.html', context)
 
-@login_required
 def data_processor(request):
+    # Auto-login
+    request = auto_login(request)
+    
     videos = SignVideo.objects.filter(uploaded_by=request.user)
     return render(request, 'translator/data_processor.html', {'videos': videos})
 
-@login_required
 def model_trainer(request):
+    # Auto-login
+    request = auto_login(request)
+    
     models = TrainedModel.objects.filter(created_by=request.user)
     return render(request, 'translator/model_trainer.html', {'models': models})
 
 # Add this decorator to the realtime_translator view
-@login_required
 @ensure_csrf_cookie
 def realtime_translator(request):
+    # Auto-login
+    request = auto_login(request)
+    
     models = TrainedModel.objects.filter(created_by=request.user)
     
     # If this is an AJAX request, just return a simple response to refresh the CSRF token
@@ -95,8 +118,10 @@ def realtime_translator(request):
     
     return render(request, 'translator/realtime_translator.html', {'models': models})
 
-@login_required
 def upload_video(request):
+    # Auto-login
+    request = auto_login(request)
+    
     if request.method == 'POST':
         form = VideoUploadForm(request.POST, request.FILES)
         if form.is_valid():
@@ -109,8 +134,10 @@ def upload_video(request):
         form = VideoUploadForm()
     return render(request, 'translator/upload_video.html', {'form': form})
 
-@login_required
 def upload_model(request):
+    # Auto-login
+    request = auto_login(request)
+    
     if request.method == 'POST':
         form = ModelUploadForm(request.POST, request.FILES)
         if form.is_valid():
@@ -123,8 +150,10 @@ def upload_model(request):
         form = ModelUploadForm()
     return render(request, 'translator/upload_model.html', {'form': form})
 
-@login_required
 def process_data(request):
+    # Auto-login
+    request = auto_login(request)
+    
     # Get all videos from the user
     videos = SignVideo.objects.filter(uploaded_by=request.user)
     
@@ -309,8 +338,10 @@ def detect_hand_and_elbow_movement(video_path, hands, pose):
 
     return start_frame, end_frame, landmarks_history
 
-@login_required
 def train_model(request):
+    # Auto-login
+    request = auto_login(request)
+    
     if request.method == 'POST':
         form = ModelTrainerForm(request.POST, request.FILES)
         if form.is_valid():
@@ -402,9 +433,11 @@ def train_model_background(pickle_path, user_id):
         logging.error(f"Error in model training: {str(e)}")
         logging.error(traceback.format_exc())
 
-@login_required
 @ensure_csrf_cookie
 def translate_video(request):
+    # Auto-login
+    request = auto_login(request)
+    
     if request.method == 'POST':
         try:
             video_file = request.FILES.get('video')
@@ -487,6 +520,9 @@ def translate_video_background(video_path, model_path):
 @csrf_exempt
 @ensure_csrf_cookie
 def translate_frame(request):
+    # Auto-login
+    request = auto_login(request)
+    
     if request.method == 'POST':
         try:
             # Get frame data
@@ -499,16 +535,10 @@ def translate_frame(request):
             # Read frame
             frame = cv2.imdecode(np.frombuffer(frame_data.read(), np.uint8), cv2.IMREAD_COLOR)
             
-            # Get model - check if it exists and belongs to the current user
+            # Get model
             try:
                 # First check if the model exists at all
                 model_obj = TrainedModel.objects.get(id=model_id)
-                
-                # Then check if it belongs to the current user (if user is authenticated)
-                if request.user.is_authenticated and model_obj.created_by != request.user:
-                    logging.warning(f"User {request.user.username} attempted to access model {model_id} belonging to {model_obj.created_by.username}")
-                    return JsonResponse({'error': 'You do not have permission to use this model'}, status=403)
-                
                 model_path = os.path.join(settings.MEDIA_ROOT, model_obj.file.name)
                 
                 # Check if the model file exists
