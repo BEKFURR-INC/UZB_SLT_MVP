@@ -119,9 +119,14 @@ CHANNEL_LAYERS = {
 }
 
 # Session cookie settings for cross-domain
-SESSION_COOKIE_SECURE = True  # Use secure cookies for HTTPS
-SESSION_COOKIE_SAMESITE = 'None'  # Allow cross-site cookies when needed
+SESSION_COOKIE_SECURE = False  # Changed to False for local development
+SESSION_COOKIE_SAMESITE = 'Lax'  # Changed to Lax for better compatibility
 
 # Session settings
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = 86400  # 24 hours in seconds
+
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+]
