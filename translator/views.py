@@ -58,14 +58,15 @@ def custom_login(request):
                 )
             
             # Authenticate and login
-            user = authenticate(username='BEKFURR', password='BEKFURR')
+            user = authenticate(request=request, username='BEKFURR', password='BEKFURR')
             if user is not None:
                 login(request, user)
                 messages.success(request, 'Login successful!')
                 return redirect('dashboard')
-        
-        # If credentials don't match
-        messages.error(request, 'Invalid credentials. Please try again.')
+            else:
+                messages.error(request, 'Authentication failed. Please contact administrator.')
+        else:
+            messages.error(request, 'Invalid credentials.')
     
     return render(request, 'registration/login.html')
 
