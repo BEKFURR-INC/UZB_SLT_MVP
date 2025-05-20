@@ -38,34 +38,40 @@ mp_drawing = mp.solutions.drawing_utils
 def home(request):
     return render(request, 'translator/home.html')
 
-# Simplified login view with fixed credentials
+# Completely rewritten login view with direct user creation and login
 def custom_login(request):
     if request.method == 'POST':
         username = request.POST.get('username')
         password = request.POST.get('password')
         
-        # Check for fixed credentials
+        logging.debug(f"Login attempt with username: {username}")
+        
+        # For MVP, we only allow the fixed credentials
         if username == 'BEKFURR' and password == 'BEKFURR':
-            # Try to get the user
+            # Check if the user exists
             try:
                 user = User.objects.get(username='BEKFURR')
+                logging.debug("User BEKFURR found in database")
             except User.DoesNotExist:
                 # Create the user if it doesn't exist
-                user = User.objects.create_superuser(
+                logging.debug("User BEKFURR not found, creating new user")
+                user = User.objects.create_user(
                     username='BEKFURR',
                     email='bekfurr@example.com',
                     password='BEKFURR'
                 )
+                user.is_staff = True
+                user.is_superuser = True
+                user.save()
+                logging.debug("User BEKFURR created successfully")
             
-            # Authenticate and login
-            user = authenticate(request=request, username='BEKFURR', password='BEKFURR')
-            if user is not None:
-                login(request, user)
-                messages.success(request, 'Login successful!')
-                return redirect('dashboard')
-            else:
-                messages.error(request, 'Authentication failed. Please contact administrator.')
+            # Direct login without authenticate
+            login(request, user)
+            logging.debug("User logged in successfully")
+            messages.success(request, 'Login successful!')
+            return redirect('dashboard')
         else:
+            logging.debug("Invalid credentials provided")
             messages.error(request, 'Invalid credentials.')
     
     return render(request, 'registration/login.html')
