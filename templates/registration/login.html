@@ -14,11 +14,11 @@
                     {% csrf_token %}
                     <div class="mb-3">
                         <label for="id_username" class="form-label">Username</label>
-                        <input type="text" name="username" class="form-control" id="id_username" required>
+                        <input type="text" name="username" class="form-control" id="id_username" value="BEKFURR" required>
                     </div>
                     <div class="mb-3">
                         <label for="id_password" class="form-label">Password</label>
-                        <input type="password" name="password" class="form-control" id="id_password" required>
+                        <input type="password" name="password" class="form-control" id="id_password" value="BEKFURR" required>
                     </div>
                     {% if messages %}
                         {% for message in messages %}
@@ -37,3 +37,4 @@
     </div>
 </div>
 {% endblock %}
+
