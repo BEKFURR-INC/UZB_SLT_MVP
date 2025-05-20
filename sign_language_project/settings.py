@@ -11,7 +11,7 @@ SECRET_KEY = 'django-insecure-bekfurr-inc-2025-sign-language-translator'
 DEBUG = True
 
 # Update allowed hosts to include Render.com domains
-ALLOWED_HOSTS = ['*', '.onrender.com', 'uzb-slt-mvp.onrender.com', 'https://uzb-slt-mvp.onrender.com']
+ALLOWED_HOSTS = ['*', '.onrender.com', 'uzb-slt-mvp.onrender.com']
 
 # CSRF Trusted Origins - Add your Render.com domain here
 CSRF_TRUSTED_ORIGINS = [
@@ -121,3 +121,7 @@ CHANNEL_LAYERS = {
 # Session cookie settings for cross-domain
 SESSION_COOKIE_SECURE = True  # Use secure cookies for HTTPS
 SESSION_COOKIE_SAMESITE = 'None'  # Allow cross-site cookies when needed
+
+# Session settings
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_AGE = 86400  # 24 hours in seconds
