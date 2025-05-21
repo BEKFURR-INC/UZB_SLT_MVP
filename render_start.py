@@ -4,6 +4,7 @@ import sys
 import subprocess
 import time
 import logging
+import shutil
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -35,31 +36,59 @@ def main():
     # Wait a moment to ensure database is ready
     time.sleep(2)
     
-    try:
-        # Try to use Daphne (for WebSocket support)
-        logger.info(f"Attempting to start Daphne on port {port}...")
-        subprocess.run([
-            'daphne',
-            '--bind', '0.0.0.0',
-            '--port', port,
-            'sign_language_project.asgi:application'
-        ], check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.error(f"Daphne failed: {e}")
-        logger.info("Falling back to Django development server...")
-        
-        # Import Django's execute_from_command_line
+    # Check if Daphne is installed and available in PATH
+    daphne_path = shutil.which('daphne')
+    
+    if daphne_path:
+        logger.info(f"Found Daphne at: {daphne_path}")
         try:
-            from django.core.management import execute_from_command_line
-        except ImportError as exc:
-            raise ImportError(
-                "Couldn't import Django. Are you sure it's installed and "
-                "available on your PYTHONPATH environment variable? Did you "
-                "forget to activate a virtual environment?"
-            ) from exc
+            # Try to use Daphne (for WebSocket support)
+            logger.info(f"Attempting to start Daphne on port {port}...")
+            
+            # Use subprocess.Popen to start Daphne
+            daphne_process = subprocess.Popen([
+                daphne_path,
+                '-b', '0.0.0.0',
+                '-p', port,
+                'sign_language_project.asgi:application'
+            ])
+            
+            # Log the process ID
+            logger.info(f"Daphne started with PID: {daphne_process.pid}")
+            
+            # Wait for the process to complete
+            daphne_process.wait()
+            
+            # If we get here, Daphne has exited
+            logger.error(f"Daphne exited with code: {daphne_process.returncode}")
+            
+        except Exception as e:
+            logger.error(f"Error starting Daphne: {e}")
+            logger.info("Falling back to Django development server...")
+            fallback_to_django(port)
+    else:
+        logger.warning("Daphne not found in PATH. Falling back to Django development server...")
+        fallback_to_django(port)
+
+def fallback_to_django(port):
+    """Fall back to Django development server if Daphne fails."""
+    try:
+        # Import Django's execute_from_command_line
+        from django.core.management import execute_from_command_line
         
         # Run Django development server with explicit port binding
+        logger.info(f"Starting Django development server on port {port}...")
         execute_from_command_line(['manage.py', 'runserver', f'0.0.0.0:{port}'])
+    except ImportError as exc:
+        logger.error(f"Error importing Django: {exc}")
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    except Exception as e:
+        logger.error(f"Error starting Django development server: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
