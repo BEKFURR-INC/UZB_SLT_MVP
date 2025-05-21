@@ -17,6 +17,7 @@ from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.core.files.storage import FileSystemStorage
+from django.db import connection
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
@@ -26,6 +27,7 @@ from .models import SignVideo, TrainedModel, TranslationSession
 
 # Logging setup
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # MediaPipe initialization
 mp_hands = mp.solutions.hands
@@ -46,10 +48,10 @@ def get_default_user():
         if created:
             user.set_password('BEKFURR')
             user.save()
-            logging.debug("Created default user BEKFURR")
+            logger.debug("Created default user BEKFURR")
         return user
     except Exception as e:
-        logging.error(f"Error getting default user: {e}")
+        logger.error(f"Error getting default user: {e}")
         # Fallback to first superuser or create one if none exists
         try:
             return User.objects.filter(is_superuser=True).first() or User.objects.create_superuser(
@@ -64,8 +66,43 @@ def auto_login(request):
         user = get_default_user()
         if user:
             login(request, user)
-            logging.debug(f"Auto-logged in as {user.username}")
+            logger.debug(f"Auto-logged in as {user.username}")
     return request
+
+# Function to check if a table exists
+def table_exists(table_name):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=%s",
+                [table_name]
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.error(f"Error checking if table exists: {e}")
+        return False
+
+# Function to safely get models without crashing if table doesn't exist
+def safe_get_models(user):
+    try:
+        if not table_exists('translator_trainedmodel'):
+            logger.warning("Table translator_trainedmodel does not exist")
+            return []
+        return TrainedModel.objects.filter(created_by=user)
+    except Exception as e:
+        logger.error(f"Error getting models: {e}")
+        return []
+
+# Function to safely get videos without crashing if table doesn't exist
+def safe_get_videos(user):
+    try:
+        if not table_exists('translator_signvideo'):
+            logger.warning("Table translator_signvideo does not exist")
+            return []
+        return SignVideo.objects.filter(uploaded_by=user)
+    except Exception as e:
+        logger.error(f"Error getting videos: {e}")
+        return []
 
 # Add this decorator to the home view
 @ensure_csrf_cookie
@@ -79,9 +116,18 @@ def dashboard(request):
     request = auto_login(request)
     
     user = request.user
-    user_models = TrainedModel.objects.filter(created_by=user)
-    user_videos = SignVideo.objects.filter(uploaded_by=user)
-    user_sessions = TranslationSession.objects.filter(user=user).order_by('-start_time')[:5]
+    
+    # Safely get models and videos
+    user_models = safe_get_models(user)
+    user_videos = safe_get_videos(user)
+    
+    # Safely get sessions
+    user_sessions = []
+    try:
+        if table_exists('translator_translationsession'):
+            user_sessions = TranslationSession.objects.filter(user=user).order_by('-start_time')[:5]
+    except Exception as e:
+        logger.error(f"Error getting sessions: {e}")
     
     context = {
         'user_models': user_models,
@@ -94,14 +140,16 @@ def data_processor(request):
     # Auto-login
     request = auto_login(request)
     
-    videos = SignVideo.objects.filter(uploaded_by=request.user)
+    videos = safe_get_videos(request.user)
+    
     return render(request, 'translator/data_processor.html', {'videos': videos})
 
 def model_trainer(request):
     # Auto-login
     request = auto_login(request)
     
-    models = TrainedModel.objects.filter(created_by=request.user)
+    models = safe_get_models(request.user)
+    
     return render(request, 'translator/model_trainer.html', {'models': models})
 
 # Add this decorator to the realtime_translator view
@@ -110,7 +158,12 @@ def realtime_translator(request):
     # Auto-login
     request = auto_login(request)
     
-    models = TrainedModel.objects.filter(created_by=request.user)
+    # Use empty list if models can't be retrieved
+    try:
+        models = safe_get_models(request.user)
+    except Exception as e:
+        logger.error(f"Error in realtime_translator: {e}")
+        models = []
     
     # If this is an AJAX request, just return a simple response to refresh the CSRF token
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -155,7 +208,7 @@ def process_data(request):
     request = auto_login(request)
     
     # Get all videos from the user
-    videos = SignVideo.objects.filter(uploaded_by=request.user)
+    videos = safe_get_videos(request.user)
     
     if request.method == 'POST':
         # Create temporary directory for processing
@@ -211,10 +264,10 @@ def process_data_background(temp_dir, user_id):
             word = item["word_uz"]
             video_path = os.path.join(temp_dir, item["video"])
             if not os.path.exists(video_path):
-                logging.warning(f"Video file not found: {video_path}")
+                logger.warning(f"Video file not found: {video_path}")
                 continue
             
-            logging.info(f"Processing video: {video_path} for class: {word}")
+            logger.info(f"Processing video: {video_path} for class: {word}")
             start_frame, end_frame, landmarks_history = detect_hand_and_elbow_movement(video_path, hands, pose)
             
             if landmarks_history:
@@ -223,19 +276,19 @@ def process_data_background(temp_dir, user_id):
                     expected_length = len(frame_features[0])
                     frame_features = [f for f in frame_features if len(f) == expected_length]
                     if len(frame_features) == 0:
-                        logging.warning(f"No consistent features extracted from video: {video_path}, using default zero features.")
+                        logger.warning(f"No consistent features extracted from video: {video_path}, using default zero features.")
                         frame_features = [np.zeros(88).tolist()]
                     avg_features = np.mean(frame_features, axis=0)
                     data.append(avg_features)
                     labels.append(word)
                     class_names.append(word)
-                    logging.info(f"Successfully processed video: {video_path}, class: {word}")
+                    logger.info(f"Successfully processed video: {video_path}, class: {word}")
                 else:
-                    logging.warning(f"No valid features extracted from video: {video_path}, using default zero features.")
+                    logger.warning(f"No valid features extracted from video: {video_path}, using default zero features.")
                     data.append(np.zeros(88).tolist())
                     labels.append(word)
                     class_names.append(word)
-                    logging.info(f"Added default features for video: {video_path}, class: {word}, label: {word}")
+                    logger.info(f"Added default features for video: {video_path}, class: {word}, label: {word}")
         
         # Save processed data
         pickle_path = os.path.join(settings.MEDIA_ROOT, 'data', f'data_mixed_{uuid.uuid4().hex}.pickle')
@@ -248,10 +301,10 @@ def process_data_background(temp_dir, user_id):
         import shutil
         shutil.rmtree(temp_dir)
         
-        logging.info(f"Data processing completed. Saved to {pickle_path}")
+        logger.info(f"Data processing completed. Saved to {pickle_path}")
     except Exception as e:
-        logging.error(f"Error in data processing: {str(e)}")
-        logging.error(traceback.format_exc())
+        logger.error(f"Error in data processing: {str(e)}")
+        logger.error(traceback.format_exc())
 
 def detect_hand_and_elbow_movement(video_path, hands, pose):
     cap = cv2.VideoCapture(video_path)
@@ -334,7 +387,7 @@ def detect_hand_and_elbow_movement(video_path, hands, pose):
             landmarks_history = [np.zeros(88).tolist()]
             start_frame = 0
             end_frame = 0
-            logging.warning(f"No landmarks detected in video: {video_path}, using default zero features.")
+            logger.warning(f"No landmarks detected in video: {video_path}, using default zero features.")
 
     return start_frame, end_frame, landmarks_history
 
@@ -371,28 +424,28 @@ def train_model_background(pickle_path, user_id):
         labels = data_dict['labels']
         
         if not data:
-            logging.error("No data found in the pickle file!")
+            logger.error("No data found in the pickle file!")
             return
         
         unique_classes = len(set(labels))
         if unique_classes < 2:
-            logging.warning(f"Only {unique_classes} class found! Training with limited data might not be effective.")
+            logger.warning(f"Only {unique_classes} class found! Training with limited data might not be effective.")
             if unique_classes == 0:
-                logging.error("No classes found!")
+                logger.error("No classes found!")
                 return
         
         feature_lengths = [len(d) for d in data]
         if not feature_lengths:
-            logging.error("No valid feature lengths found in data!")
+            logger.error("No valid feature lengths found in data!")
             return
         most_common_length = max(set(feature_lengths), key=feature_lengths.count)
-        logging.info(f"Most common feature length: {most_common_length}")
+        logger.info(f"Most common feature length: {most_common_length}")
         
         filtered_data = [d for d in data if len(d) == most_common_length]
         filtered_labels = [labels[i] for i, d in enumerate(data) if len(d) == most_common_length]
         
         if not filtered_data:
-            logging.error("No valid data for training after filtering!")
+            logger.error("No valid data for training after filtering!")
             return
         
         data = np.asarray(filtered_data)
@@ -407,7 +460,7 @@ def train_model_background(pickle_path, user_id):
         model.fit(x_train, y_train)
         y_predict = model.predict(x_test)
         score = accuracy_score(y_predict, y_test)
-        logging.info(f'Hand + Elbow: {score * 100:.2f}% of samples classified correctly!')
+        logger.info(f'Hand + Elbow: {score * 100:.2f}% of samples classified correctly!')
         
         # Save model
         model_path = os.path.join(settings.MEDIA_ROOT, 'models', f'model_mixed_{uuid.uuid4().hex}.p')
@@ -428,10 +481,10 @@ def train_model_background(pickle_path, user_id):
             accuracy=score * 100
         )
         
-        logging.info(f"Model training completed. Saved to {model_path}")
+        logger.info(f"Model training completed. Saved to {model_path}")
     except Exception as e:
-        logging.error(f"Error in model training: {str(e)}")
-        logging.error(traceback.format_exc())
+        logger.error(f"Error in model training: {str(e)}")
+        logger.error(traceback.format_exc())
 
 @ensure_csrf_cookie
 def translate_video(request):
@@ -467,15 +520,16 @@ def translate_video(request):
             except TrainedModel.DoesNotExist:
                 return JsonResponse({'error': 'Model not found.'}, status=404)
             except Exception as e:
-                logging.error(f"Error in translate_video: {str(e)}")
-                logging.error(traceback.format_exc())
+                logger.error(f"Error in translate_video: {str(e)}")
+                logger.error(traceback.format_exc())
                 return JsonResponse({'error': str(e)}, status=500)
         except Exception as e:
-            logging.error(f"Outer error in translate_video: {str(e)}")
-            logging.error(traceback.format_exc())
+            logger.error(f"Outer error in translate_video: {str(e)}")
+            logger.error(traceback.format_exc())
             return JsonResponse({'error': str(e)}, status=500)
     
-    models = TrainedModel.objects.filter(created_by=request.user)
+    models = safe_get_models(request.user)
+    
     return render(request, 'translator/translate_video.html', {'models': models})
 
 def translate_video_background(video_path, model_path):
@@ -513,8 +567,8 @@ def translate_video_background(video_path, model_path):
         else:
             return "No valid data detected"
     except Exception as e:
-        logging.error(f"Error in video translation: {str(e)}")
-        logging.error(traceback.format_exc())
+        logger.error(f"Error in video translation: {str(e)}")
+        logger.error(traceback.format_exc())
         return f"Error: {str(e)}"
 
 @csrf_exempt
@@ -543,11 +597,11 @@ def translate_frame(request):
                 
                 # Check if the model file exists
                 if not os.path.exists(model_path):
-                    logging.error(f"Model file not found: {model_path}")
+                    logger.error(f"Model file not found: {model_path}")
                     return JsonResponse({'error': 'Model file not found'}, status=404)
                 
             except TrainedModel.DoesNotExist:
-                logging.error(f"Model with ID {model_id} not found")
+                logger.error(f"Model with ID {model_id} not found")
                 return JsonResponse({'error': 'Model not found. Please select a valid model.'}, status=404)
             
             # Load model
@@ -558,7 +612,7 @@ def translate_frame(request):
                     label_mapping = model_data.get('label_mapping', {})
                     inverse_label_mapping = {v: k for k, v in label_mapping.items()}
             except Exception as e:
-                logging.error(f"Error loading model file: {str(e)}")
+                logger.error(f"Error loading model file: {str(e)}")
                 return JsonResponse({'error': 'Error loading model file'}, status=500)
             
             # Initialize MediaPipe with lower detection confidence
@@ -706,8 +760,8 @@ def translate_frame(request):
                     'frame': f"data:image/jpeg;base64,{frame_base64}"
                 })
         except Exception as e:
-            logging.error(f"Error in frame translation: {str(e)}")
-            logging.error(traceback.format_exc())
+            logger.error(f"Error in frame translation: {str(e)}")
+            logger.error(traceback.format_exc())
             return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Only POST method is allowed'}, status=405)
