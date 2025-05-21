@@ -82,11 +82,48 @@ def table_exists(table_name):
         logger.error(f"Error checking if table exists: {e}")
         return False
 
+# Function to create tables if they don't exist
+def ensure_tables_exist():
+    try:
+        from django.core.management import call_command
+        
+        # Check if tables exist
+        required_tables = ['translator_trainedmodel', 'translator_signvideo', 'translator_translationsession']
+        missing_tables = [table for table in required_tables if not table_exists(table)]
+        
+        if missing_tables:
+            logger.warning(f"Missing tables detected: {missing_tables}")
+            
+            # Create migrations
+            logger.info("Creating migrations...")
+            call_command('makemigrations', 'translator', interactive=False)
+            
+            # Apply migrations
+            logger.info("Applying migrations...")
+            call_command('migrate', interactive=False)
+            
+            # Verify tables were created
+            missing_tables = [table for table in required_tables if not table_exists(table)]
+            if missing_tables:
+                logger.error(f"Failed to create tables: {missing_tables}")
+                return False
+            else:
+                logger.info("All required tables created successfully!")
+                return True
+        else:
+            logger.info("All required tables exist!")
+            return True
+    except Exception as e:
+        logger.error(f"Error ensuring tables exist: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
 # Function to safely get models without crashing if table doesn't exist
 def safe_get_models(user):
     try:
         if not table_exists('translator_trainedmodel'):
             logger.warning("Table translator_trainedmodel does not exist")
+            ensure_tables_exist()
             return []
         return TrainedModel.objects.filter(created_by=user)
     except Exception as e:
@@ -98,6 +135,7 @@ def safe_get_videos(user):
     try:
         if not table_exists('translator_signvideo'):
             logger.warning("Table translator_signvideo does not exist")
+            ensure_tables_exist()
             return []
         return SignVideo.objects.filter(uploaded_by=user)
     except Exception as e:
@@ -175,14 +213,22 @@ def upload_video(request):
     # Auto-login
     request = auto_login(request)
     
+    # Ensure tables exist before trying to save
+    ensure_tables_exist()
+    
     if request.method == 'POST':
         form = VideoUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            video = form.save(commit=False)
-            video.uploaded_by = request.user
-            video.save()
-            messages.success(request, 'Video uploaded successfully!')
-            return redirect('data_processor')
+            try:
+                video = form.save(commit=False)
+                video.uploaded_by = request.user
+                video.save()
+                messages.success(request, 'Video uploaded successfully!')
+                return redirect('data_processor')
+            except Exception as e:
+                logger.error(f"Error saving video: {e}")
+                messages.error(request, f"Error saving video: {str(e)}")
+                return redirect('upload_video')
     else:
         form = VideoUploadForm()
     return render(request, 'translator/upload_video.html', {'form': form})
@@ -191,14 +237,22 @@ def upload_model(request):
     # Auto-login
     request = auto_login(request)
     
+    # Ensure tables exist before trying to save
+    ensure_tables_exist()
+    
     if request.method == 'POST':
         form = ModelUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            model = form.save(commit=False)
-            model.created_by = request.user
-            model.save()
-            messages.success(request, 'Model uploaded successfully!')
-            return redirect('model_trainer')
+            try:
+                model = form.save(commit=False)
+                model.created_by = request.user
+                model.save()
+                messages.success(request, 'Model uploaded successfully!')
+                return redirect('model_trainer')
+            except Exception as e:
+                logger.error(f"Error saving model: {e}")
+                messages.error(request, f"Error saving model: {str(e)}")
+                return redirect('upload_model')
     else:
         form = ModelUploadForm()
     return render(request, 'translator/upload_model.html', {'form': form})
@@ -395,6 +449,9 @@ def train_model(request):
     # Auto-login
     request = auto_login(request)
     
+    # Ensure tables exist before trying to save
+    ensure_tables_exist()
+    
     if request.method == 'POST':
         form = ModelTrainerForm(request.POST, request.FILES)
         if form.is_valid():
@@ -469,19 +526,25 @@ def train_model_background(pickle_path, user_id):
         with open(model_path, 'wb') as f:
             pickle.dump({'model': model, 'label_mapping': label_mapping}, f)
         
+        # Ensure tables exist before saving model
+        ensure_tables_exist()
+        
         # Create model record
         model_name = f"Model {uuid.uuid4().hex[:8]}"
         model_file = os.path.relpath(model_path, settings.MEDIA_ROOT)
         
-        TrainedModel.objects.create(
-            name=model_name,
-            description=f"Trained with {len(data)} samples, {unique_classes} classes",
-            file=model_file,
-            created_by=user,
-            accuracy=score * 100
-        )
-        
-        logger.info(f"Model training completed. Saved to {model_path}")
+        try:
+            TrainedModel.objects.create(
+                name=model_name,
+                description=f"Trained with {len(data)} samples, {unique_classes} classes",
+                file=model_file,
+                created_by=user,
+                accuracy=score * 100
+            )
+            logger.info(f"Model training completed and saved to database. File: {model_path}")
+        except Exception as e:
+            logger.error(f"Error saving model to database: {e}")
+            logger.error(traceback.format_exc())
     except Exception as e:
         logger.error(f"Error in model training: {str(e)}")
         logger.error(traceback.format_exc())
